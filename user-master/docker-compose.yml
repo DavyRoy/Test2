@@ -1,0 +1,57 @@
+version: '3.7'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: user_db
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: user-api
+      POSTGRES_PASSWORD: 7aw5AXSg
+      POSTGRES_DB: user-api_db
+      POSTGRES_HOST: localhost
+
+  user_api:
+    build: .
+    container_name: user_api
+    ports:
+      - "8001:8000"
+    depends_on:
+      - postgres
+    networks:
+      - gen_dev
+      - default
+    hostname: user-api
+    environment:
+      KEYDB_HOST: keydb
+      KEYDB_PORT: 6379
+      KEYDB_PASSWORD: eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+
+    volumes:
+      - ./coverage_reports:/usr/share/coverage_reports
+    command: bash -c "./wait-for-it.sh keydb-cache:6379 -s --
+      ./docker-entrypoint.sh"
+
+  user_consumer:
+    build: .
+    container_name: user_consumer
+    depends_on:
+      - postgres
+      - user_api
+    networks:
+      - gen_dev
+      - default
+    environment:
+      DEBUG: 1
+      SECRET_KEY: 'k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d'
+      DATABASE_URI: 'postgres://user_api_stage:gvyzrFLDXlje6AtgM3bPRzAZS@10.222.0.2:5432/user_api_stage'
+      DEV_ENV: 1
+    command: ./wait-for-it.sh rabbitmq:5672 -s -t 30 -- python3 /usr/srv/user-api/src/manage.py start_consuming
+
+
+networks:
+  gen_dev:
+    external: true
