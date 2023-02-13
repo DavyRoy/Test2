@@ -1,0 +1,70 @@
+version: '3.7'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: task_db
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: gen-task
+      POSTGRES_PASSWORD: 7aw5AXSg
+      POSTGRES_DB: gen-task-db
+    ports:
+      - "5432:5432"
+
+  task_api:
+    build: .
+    container_name: task_api
+    ports:
+      - "8003:8000"
+    depends_on:
+      - postgres
+    hostname: task-api
+    networks:
+      - gen_dev
+      - default
+    environment:
+      DEBUG: 1
+      SECRET_KEY: 'k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d'
+      ALLOWED_HOSTS: '*'
+      CORS_ORIGIN_WHITELIST: http://localhost:8080
+      DATABASE_URI: 'postgres://task_api_stage:ENx2JCdwGaTPkGZD1BmLICt2M@10.222.0.2:5432/task_api_stage'
+    command: bash -c "./docker-entrypoint.sh"
+
+    volumes:
+      - ./coverage_reports:/usr/share/coverage_reports
+
+  task_api_celery:
+    build: .
+    container_name: task_api_celery
+    networks:
+      - gen_dev
+      - default
+    environment:
+      DEBUG: 1
+      SECRET_KEY: 'k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d'
+      ALLOWED_HOSTS: '*'
+      CORS_ORIGIN_WHITELIST: http://localhost:8080
+      DATABASE_URI: 'postgres://task_api_stage:ENx2JCdwGaTPkGZD1BmLICt2M@10.222.0.2:5432/task_api_stage'
+    command: bash -c "cd src && python manage.py migrate && celery -A gen_task_api worker -l INFO"
+
+  task_beat:
+    build: .
+    container_name: task_api_celery_beat
+    networks:
+      - gen_dev
+      - default
+    environment:
+      DEBUG: 1
+      SECRET_KEY: 'k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d'
+      ALLOWED_HOSTS: '*'
+      CORS_ORIGIN_WHITELIST: http://localhost:8080
+      DATABASE_URI: 'postgres://task_api_stage:ENx2JCdwGaTPkGZD1BmLICt2M@10.222.0.2:5432/task_api_stage'
+    command: bash -c "cd src && python manage.py migrate && celery -A gen_task_api beat -l debug --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+
+networks:
+  gen_dev:
+    external: true
