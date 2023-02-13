@@ -1,0 +1,41 @@
+version: '3.7'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: document_api_db
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: gen_document_api
+      POSTGRES_PASSWORD: 7aw5AXSg
+      POSTGRES_DB: document_api_db
+
+  document_api:
+    build: .
+    ports:
+      - 8002:8000
+    depends_on:
+      - postgres
+    networks:
+      - default
+      - gen_dev
+    hostname: document-api
+    environment:
+      DEBUG: 1
+      SECRET_KEY: "k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d"
+      DATABASE_URI: "postgres://gen_document_api:7aw5AXSg@postgres:5432/document_api_db"
+    volumes:
+      - ./coverage_reports:/usr/share/coverage_reports
+    command: bash -c "
+      cd /usr/srv/document_api/src &&
+      python3 manage.py migrate &&
+      python3 manage.py auto_create_super_user &&
+      uvicorn document_api.asgi:application --host 0.0.0.0 --port 8000
+      "
+
+networks:
+  gen_dev:
+    external: true
