@@ -1,0 +1,167 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${CI_PROJECT_NAME}-start-script
+  labels:
+    k8s-app: ${CI_PROJECT_NAME}
+    app-group: backend
+data:
+  start.sh: |-
+      python3 /app/src/manage.py collectstatic
+      python3 /app/src/manage.py migrate
+      python3 /app/src/manage.py auto_create_super_user
+      uvicorn gpg_api.asgi:application --host 0.0.0.0 --port ${APP_PORT}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${CI_PROJECT_NAME}-env-config
+  labels:
+    k8s-app: ${CI_PROJECT_NAME}
+    app-group: backend
+data:
+  .env: |-
+      RSA_TEST_KEY="${RSA_TEST_KEY}"
+      RSA_TEST_PUB="${RSA_TEST_PUB}"
+      SECRET_KEY="${SECRET_KEY}"
+      DEBUG=${DEBUG}
+      DEV_ENV=${DEV_ENV}
+      ALLOWED_HOSTS="${ALLOWED_HOSTS}"
+      DATABASE_URI="${DATABASE_URI}"
+      CORS_ORIGIN_WHITELIST="${CORS_ORIGIN_WHITELIST}"
+      RABBITMQ_URL="${RABBITMQ_URL}"
+      SUPERUSER_USERNAME="${SUPERUSER_USERNAME}"
+      SUPERUSER_PASSWORD="${SUPERUSER_PASSWORD}"
+      KEYDB_HOST="${KEYDB_HOST}"
+      KEYDB_PORT=${KEYDB_PORT}
+      KEYDB_DB="${KEYDB_DB}"
+      KEYDB_PASSWORD="${KEYDB_PASSWORD}"
+      USER_API_URL="${USER_API_URL}"
+      USER_API_TOKEN="${USER_API_TOKEN}"
+      DOCUMENT_API_URL="${DOCUMENT_API_URL}"
+      DOCUMENT_API_TOKEN="${DOCUMENT_API_TOKEN}"
+      TASK_API_URL="${TASK_API_URL}"
+      TASK_API_TOKEN="${TASK_API_TOKEN}"
+      USER_API_SALT="${USER_API_SALT}"
+      USER_API_ALGORITHM="${USER_API_ALGORITHM}"
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ${CI_PROJECT_NAME}
+  labels:
+    k8s-app: ${CI_PROJECT_NAME}
+    app-group: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: ${CI_PROJECT_NAME}
+      app-group: backend
+  template:
+    metadata:
+      name: ${CI_PROJECT_NAME}
+      labels:
+        k8s-app: ${CI_PROJECT_NAME}
+        app-group: backend
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      volumes:
+      - name: env-config
+        configMap:
+          name: ${CI_PROJECT_NAME}-env-config
+          items:
+          - key: .env
+            path: .env
+      - name: start-script
+        configMap:
+          name: ${CI_PROJECT_NAME}-start-script
+          items:
+            - key: start.sh
+              path: start.sh
+      containers:
+        - name: ${CI_PROJECT_NAME}
+          image: ${CI_REGISTRY_IMAGE}/${CI_COMMIT_SHORT_SHA}:latest
+          command: ["bash", "/app/start.sh"]
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: ${APP_PORT}
+          volumeMounts:
+            - mountPath: /app/src/gpg_api/settings/.env
+              name: env-config
+              subPath: .env
+            - mountPath: /app/start.sh
+              subPath: start.sh
+              name: start-script
+          securityContext:
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: ${CI_PROJECT_NAME}
+  labels:
+    k8s-app: ${CI_PROJECT_NAME}
+    app-group: backend
+spec:
+  ports:
+    - protocol: TCP
+      port: ${APP_PORT}
+      targetPort: ${APP_PORT}
+  selector:
+    k8s-app: ${CI_PROJECT_NAME}
+    app-group: backend
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${CI_PROJECT_NAME}
+spec:
+  secretName: ${CI_ENVIRONMENT_URL}-tls
+  dnsNames:
+    - ${CI_ENVIRONMENT_URL}
+  duration: 168h
+  renewBefore: 24h
+  issuerRef:
+    group: cert-manager.k8s.cloudflare.com
+    kind: OriginIssuer
+    name: prod-issuer
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: ${CI_PROJECT_NAME}
+  labels:
+    k8s-app: ${CI_PROJECT_NAME}
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    cert-manager.io/issuer: prod-issuer
+    cert-manager.io/issuer-kind: OriginIssuer
+    cert-manager.io/issuer-group: cert-manager.k8s.cloudflare.com
+spec:
+  rules:
+    - host: ${CI_ENVIRONMENT_URL}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: $CI_PROJECT_NAME
+                port: 
+                  number: ${APP_PORT}
+  tls:
+    - hosts:
+        - ${CI_ENVIRONMENT_URL}
+      secretName: ${CI_ENVIRONMENT_URL}-tls
+---

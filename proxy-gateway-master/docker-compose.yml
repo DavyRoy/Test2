@@ -1,0 +1,79 @@
+version: '3.7'
+
+services:
+  keydb:
+    image: eqalpha/keydb:latest
+    container_name: keydb-cache
+    hostname: keydb-cache
+    networks:
+      - default
+      - gen_dev
+    ports:
+      - '6379:6379'
+    command: keydb-server --server-threads 2 --save 20 1 --loglevel warning --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+    volumes:
+      - ./redis_data:/data
+
+  postgres:
+    image: postgres:latest
+    container_name: proxy_db
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    networks:
+      - default
+    environment:
+      POSTGRES_USER: genesis_proxy_gateway
+      POSTGRES_PASSWORD: 7aw5AXSg
+      POSTGRES_DB: genesis_proxy_gateway_db
+
+  gpg_api:
+    build: .
+    container_name: proxy_api
+    ports:
+      - 8000:8000
+    hostname: gpg-api
+    depends_on:
+      - postgres
+      - keydb
+    networks:
+      - gen_dev
+      - default
+
+    volumes:
+      - ./coverage_reports:/usr/share/coverage_reports
+    environment:
+      DEBUG: 1
+      SECRET_KEY: 'k(#wgcv4oxag+64w&-t5+ziepw8dhgy=_pq!yhds$r^uhdji(d'
+      ALLOWED_HOSTS: '*'
+      CORS_ORIGIN_WHITELIST: http://localhost:8080
+      KEYDB_HOST: keydb
+      KEYDB_PORT: 6379
+      KEYDB_PASSWORD: eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+
+    command: bash -c "./wait-for-it.sh user-api:8000 -s -t 30 -- 
+      ./wait-for-it.sh document-api:8000 -s -t 30 -- 
+      ./wait-for-it.sh task-api:8000 -s -t 30 -- 
+      ./wait-for-it.sh rabbitmq:5672 -s -t 30 -- 
+      ./wait-for-it.sh keydb-cache:6379 -s -- 
+      ./docker-entrypoint.sh"
+
+  rabbitmq:
+    image: rabbitmq:3.8.9-management
+    container_name: rabbitmq
+    hostname: rabbitmq-1  # required for persistent storage, will be passed to db directory name at /opt/rabbitmq1/mnesia/
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: user
+      RABBITMQ_ERLANG_COOKIE: "SWQOKODSQALRPCLNMEQG"
+    ports:
+      - 15672:15672
+      - 5672:5672
+    networks:
+      - gen_dev
+      - default
+
+
+
+networks:
+  gen_dev:
+    external: true
